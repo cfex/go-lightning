@@ -97,6 +97,10 @@ func example(tx *sql.Tx) {
 }
 ```
 
+## Contributions
+
+We welcome all contributions to the go-lightning project. You can open issues or PR and we will review and promptly merge them.
+
 ## Roadmap
 
 - [ ] Add more examples
