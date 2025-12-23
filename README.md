@@ -104,6 +104,7 @@ func example(tx *sql.Tx) {
 - [ ] Add a project homepage
 - [ ] Add project docs
 - [ ] Add support for composite primary keys
+- [ ] Escaping sql keywords for field names and table names
 
 ## Project Philosophy
 
