@@ -1,4 +1,4 @@
-module github.com/traceway/go-lightning/lpg
+module github.com/tracewayapp/go-lightning/lpg
 
 go 1.25.1
 

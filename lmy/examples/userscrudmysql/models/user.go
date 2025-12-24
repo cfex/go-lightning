@@ -1,6 +1,6 @@
 package models
 
-import "github.com/traceway/go-lightning/lmy"
+import "github.com/tracewayapp/go-lightning/lmy"
 
 /*
 	If you don't have this table already you should create it:

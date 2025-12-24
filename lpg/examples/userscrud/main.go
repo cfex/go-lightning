@@ -8,7 +8,7 @@ import (
 	"userscrud/models"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/traceway/go-lightning/lpg"
+	"github.com/tracewayapp/go-lightning/lpg"
 )
 
 func main() {
