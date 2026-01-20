@@ -1,0 +1,203 @@
+# UUID Support
+
+go-lightning supports UUID primary keys through dedicated insert functions.
+
+## When to Use UUIDs
+
+UUIDs are useful when you need:
+- Globally unique identifiers across systems
+- IDs that don't reveal sequence information
+- Client-generated IDs before server insertion
+- Distributed systems without ID coordination
+
+## Model Definition
+
+Define your model with a string ID:
+
+```go
+type Session struct {
+    Id        string
+    UserId    int
+    Token     string
+    ExpiresAt time.Time
+}
+```
+
+When registering, go-lightning detects that `Id` is not an integer and sets `HasIntId = false`. This changes how INSERT queries are generated.
+
+## InsertGenericUuid
+
+Use this when you want go-lightning to generate the UUID:
+
+```go
+func InsertGenericUuid[T any](ex Executor, t *T) (string, error)
+```
+
+### Example
+
+```go
+type Session struct {
+    Id        string
+    UserId    int
+    Token     string
+    ExpiresAt time.Time
+}
+
+lit.RegisterModel[Session](lit.PostgreSQL)
+
+session := Session{
+    UserId:    123,
+    Token:     "abc123",
+    ExpiresAt: time.Now().Add(24 * time.Hour),
+}
+
+// go-lightning generates UUID and sets it on the struct
+uuid, err := lit.InsertGenericUuid(db, &session)
+if err != nil {
+    return err
+}
+
+fmt.Printf("Created session: %s\n", uuid)
+fmt.Printf("session.Id is also set: %s\n", session.Id)
+// Both print the same UUID
+```
+
+### How It Works
+
+1. Generates a new UUID using `github.com/google/uuid`
+2. Sets the UUID on the struct's `Id` field
+3. Executes the INSERT with all fields including the ID
+4. Returns the generated UUID
+
+## InsertGenericExistingUuid
+
+Use this when you already have a UUID:
+
+```go
+func InsertGenericExistingUuid[T any](ex Executor, t *T) error
+```
+
+### Example
+
+```go
+session := Session{
+    Id:        "550e8400-e29b-41d4-a716-446655440000", // Pre-generated or received from client
+    UserId:    123,
+    Token:     "abc123",
+    ExpiresAt: time.Now().Add(24 * time.Hour),
+}
+
+err := lit.InsertGenericExistingUuid(db, &session)
+if err != nil {
+    return err
+}
+```
+
+### Use Cases
+
+- Receiving UUIDs from clients (e.g., offline-first apps)
+- Migrating data with existing IDs
+- Testing with deterministic IDs
+- Distributed ID generation (e.g., from a separate service)
+
+## Database Schema
+
+Ensure your database table can store UUIDs:
+
+### PostgreSQL
+
+```sql
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    token VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP NOT NULL
+);
+```
+
+Or with text storage:
+
+```sql
+CREATE TABLE sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    token VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP NOT NULL
+);
+```
+
+### MySQL
+
+```sql
+CREATE TABLE sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id INT NOT NULL,
+    token VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL
+);
+```
+
+Or with BINARY storage for efficiency:
+
+```sql
+CREATE TABLE sessions (
+    id BINARY(16) PRIMARY KEY,
+    user_id INT NOT NULL,
+    token VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL
+);
+```
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "database/sql"
+    "time"
+
+    "github.com/tracewayapp/go-lightning/lit"
+    _ "github.com/lib/pq"
+)
+
+type ApiKey struct {
+    Id        string
+    UserId    int
+    Name      string
+    Key       string
+    CreatedAt time.Time
+}
+
+func init() {
+    lit.RegisterModel[ApiKey](lit.PostgreSQL)
+}
+
+type ApiKeyRepository struct{}
+
+func (r *ApiKeyRepository) Create(ex lit.Executor, userId int, name string, key string) (*ApiKey, error) {
+    apiKey := ApiKey{
+        UserId:    userId,
+        Name:      name,
+        Key:       key,
+        CreatedAt: time.Now(),
+    }
+
+    _, err := lit.InsertGenericUuid(ex, &apiKey)
+    if err != nil {
+        return nil, err
+    }
+
+    return &apiKey, nil
+}
+
+func (r *ApiKeyRepository) FindById(ex lit.Executor, id string) (*ApiKey, error) {
+    return lit.SelectSingle[ApiKey](ex,
+        "SELECT id, user_id, name, key, created_at FROM api_keys WHERE id = $1", id)
+}
+
+func (r *ApiKeyRepository) FindByUserId(ex lit.Executor, userId int) ([]*ApiKey, error) {
+    return lit.Select[ApiKey](ex,
+        "SELECT id, user_id, name, key, created_at FROM api_keys WHERE user_id = $1", userId)
+}
+```

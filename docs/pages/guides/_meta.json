@@ -1,7 +1,5 @@
 {
-  "postgresql": "PostgreSQL",
-  "mysql": "MySQL",
-  "registration": "Registration System",
   "naming-strategies": "Naming Strategies",
-  "transactions": "Transactions"
+  "uuid-support": "UUID Support",
+  "projections": "Projections & DTOs"
 }

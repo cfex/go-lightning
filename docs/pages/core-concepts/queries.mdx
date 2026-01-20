@@ -1,0 +1,147 @@
+# Queries
+
+go-lightning provides two functions for reading data: `Select` for multiple rows and `SelectSingle` for a single row.
+
+## Select
+
+Returns all matching rows as a slice of pointers:
+
+```go
+func Select[T any](ex Executor, query string, args ...any) ([]*T, error)
+```
+
+### Example
+
+```go
+// Get all users
+users, err := lit.Select[User](db, "SELECT id, first_name, last_name, email FROM users")
+if err != nil {
+    return err
+}
+
+for _, user := range users {
+    fmt.Printf("%s %s\n", user.FirstName, user.LastName)
+}
+```
+
+### With Parameters
+
+```go
+// PostgreSQL
+users, err := lit.Select[User](db,
+    "SELECT id, first_name, last_name, email FROM users WHERE last_name = $1",
+    "Doe")
+
+// MySQL
+users, err := lit.Select[User](db,
+    "SELECT id, first_name, last_name, email FROM users WHERE last_name = ?",
+    "Doe")
+```
+
+## SelectSingle
+
+Returns a single row or nil if not found:
+
+```go
+func SelectSingle[T any](ex Executor, query string, args ...any) (*T, error)
+```
+
+### Example
+
+```go
+user, err := lit.SelectSingle[User](db,
+    "SELECT id, first_name, last_name, email FROM users WHERE id = $1", id)
+if err != nil {
+    return err
+}
+if user == nil {
+    fmt.Println("User not found")
+    return nil
+}
+fmt.Printf("Found: %s\n", user.Email)
+```
+
+## Column Validation
+
+go-lightning validates that all columns in your SELECT match fields in your struct. This catches errors early:
+
+```go
+// This will return an error if 'nonexistent' is not a field in User
+users, err := lit.Select[User](db,
+    "SELECT id, first_name, nonexistent FROM users")
+// Error: invalid column that is not found in the struct: nonexistent
+```
+
+## Projections (DTOs)
+
+You can project query results into any struct, not just your registered models. This is useful for:
+- Selecting only specific columns
+- JOINs that combine multiple tables
+- Aggregations
+
+### Partial Select
+
+```go
+type UserSummary struct {
+    Id    int
+    Email string
+}
+
+lit.RegisterModel[UserSummary](lit.PostgreSQL)
+
+summaries, err := lit.Select[UserSummary](db,
+    "SELECT id, email FROM users")
+```
+
+### JOIN Results
+
+```go
+type UserWithOrder struct {
+    UserId    int
+    UserEmail string
+    OrderId   int
+    Total     float64
+}
+
+lit.RegisterModel[UserWithOrder](lit.PostgreSQL)
+
+results, err := lit.Select[UserWithOrder](db, `
+    SELECT
+        u.id as user_id,
+        u.email as user_email,
+        o.id as order_id,
+        o.total
+    FROM users u
+    JOIN orders o ON o.user_id = u.id
+    WHERE o.total > $1`, 100.00)
+```
+
+See [Projections & DTOs](/guides/projections) for more examples.
+
+## Native Queries
+
+For complex scenarios where automatic mapping doesn't work, use `SelectMultipleNative`:
+
+```go
+func SelectMultipleNative[T any](
+    ex Executor,
+    mapLine func(*interface{ Scan(...any) error }, *T) error,
+    query string,
+    args ...any,
+) ([]*T, error)
+```
+
+This gives you full control over the scanning process:
+
+```go
+type CustomResult struct {
+    Name  string
+    Count int
+}
+
+results, err := lit.SelectMultipleNative[CustomResult](db,
+    func(scanner *interface{ Scan(...any) error }, r *CustomResult) error {
+        return (*scanner).Scan(&r.Name, &r.Count)
+    },
+    "SELECT name, COUNT(*) FROM items GROUP BY name")
+```

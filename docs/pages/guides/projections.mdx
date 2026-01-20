@@ -1,0 +1,225 @@
+# Projections & DTOs
+
+go-lightning can map query results to any registered struct, not just your main models. This enables DTOs (Data Transfer Objects) for partial selects, JOINs, and aggregations.
+
+## Why Use Projections?
+
+- **Performance**: Select only the columns you need
+- **JOINs**: Combine data from multiple tables into one struct
+- **Aggregations**: Map COUNT, SUM, AVG results to structs
+- **API Responses**: Shape data for specific endpoints
+- **Security**: Exclude sensitive fields from query results
+
+## Basic Projection
+
+Select a subset of columns:
+
+```go
+// Full model
+type User struct {
+    Id           int
+    FirstName    string
+    LastName     string
+    Email        string
+    PasswordHash string
+    CreatedAt    time.Time
+    UpdatedAt    time.Time
+}
+
+// DTO with only public fields
+type UserPublic struct {
+    Id        int
+    FirstName string
+    LastName  string
+    Email     string
+}
+
+func init() {
+    lit.RegisterModel[User](lit.PostgreSQL)
+    lit.RegisterModel[UserPublic](lit.PostgreSQL)
+}
+
+// Use the projection
+users, err := lit.Select[UserPublic](db,
+    "SELECT id, first_name, last_name, email FROM users")
+// Returns []*UserPublic without password_hash, created_at, updated_at
+```
+
+## JOIN Projections
+
+Combine data from multiple tables:
+
+```go
+type OrderWithCustomer struct {
+    OrderId      int
+    OrderDate    time.Time
+    Total        float64
+    CustomerName string
+    CustomerEmail string
+}
+
+lit.RegisterModel[OrderWithCustomer](lit.PostgreSQL)
+
+results, err := lit.Select[OrderWithCustomer](db, `
+    SELECT
+        o.id as order_id,
+        o.order_date,
+        o.total,
+        c.name as customer_name,
+        c.email as customer_email
+    FROM orders o
+    JOIN customers c ON c.id = o.customer_id
+    WHERE o.order_date > $1
+`, startDate)
+```
+
+### Important: Column Aliases
+
+Use SQL aliases (`AS`) to match your struct field names:
+- `o.id` → `order_id` (matches `OrderId` field)
+- `c.name` → `customer_name` (matches `CustomerName` field)
+
+## Aggregation Projections
+
+```go
+type CategoryStats struct {
+    CategoryId   int
+    CategoryName string
+    ProductCount int
+    AvgPrice     float64
+    TotalRevenue float64
+}
+
+lit.RegisterModel[CategoryStats](lit.PostgreSQL)
+
+stats, err := lit.Select[CategoryStats](db, `
+    SELECT
+        c.id as category_id,
+        c.name as category_name,
+        COUNT(p.id) as product_count,
+        AVG(p.price) as avg_price,
+        SUM(p.price * p.units_sold) as total_revenue
+    FROM categories c
+    LEFT JOIN products p ON p.category_id = c.id
+    GROUP BY c.id, c.name
+    ORDER BY total_revenue DESC
+`)
+```
+
+## Nested Data with Multiple Queries
+
+For complex nested structures, use multiple queries:
+
+```go
+type UserWithOrders struct {
+    User   *User
+    Orders []*Order
+}
+
+func GetUserWithOrders(db *sql.DB, userId int) (*UserWithOrders, error) {
+    user, err := lit.SelectSingle[User](db,
+        "SELECT id, first_name, last_name, email FROM users WHERE id = $1", userId)
+    if err != nil {
+        return nil, err
+    }
+    if user == nil {
+        return nil, nil
+    }
+
+    orders, err := lit.Select[Order](db,
+        "SELECT id, user_id, total, status, created_at FROM orders WHERE user_id = $1", userId)
+    if err != nil {
+        return nil, err
+    }
+
+    return &UserWithOrders{User: user, Orders: orders}, nil
+}
+```
+
+## Pagination DTO
+
+```go
+type PaginatedUsers struct {
+    Users      []*UserPublic
+    TotalCount int
+    Page       int
+    PageSize   int
+}
+
+type CountResult struct {
+    Count int
+}
+
+lit.RegisterModel[CountResult](lit.PostgreSQL)
+
+func GetPaginatedUsers(db *sql.DB, page, pageSize int) (*PaginatedUsers, error) {
+    offset := (page - 1) * pageSize
+
+    // Get total count
+    countResult, err := lit.SelectSingle[CountResult](db,
+        "SELECT COUNT(*) as count FROM users")
+    if err != nil {
+        return nil, err
+    }
+
+    // Get page of users
+    users, err := lit.Select[UserPublic](db,
+        "SELECT id, first_name, last_name, email FROM users ORDER BY id LIMIT $1 OFFSET $2",
+        pageSize, offset)
+    if err != nil {
+        return nil, err
+    }
+
+    return &PaginatedUsers{
+        Users:      users,
+        TotalCount: countResult.Count,
+        Page:       page,
+        PageSize:   pageSize,
+    }, nil
+}
+```
+
+## Search Results
+
+```go
+type UserSearchResult struct {
+    Id        int
+    FirstName string
+    LastName  string
+    Email     string
+    MatchType string // "email" or "name"
+}
+
+lit.RegisterModel[UserSearchResult](lit.PostgreSQL)
+
+func SearchUsers(db *sql.DB, query string) ([]*UserSearchResult, error) {
+    searchPattern := "%" + query + "%"
+
+    return lit.Select[UserSearchResult](db, `
+        SELECT
+            id,
+            first_name,
+            last_name,
+            email,
+            CASE
+                WHEN email ILIKE $1 THEN 'email'
+                ELSE 'name'
+            END as match_type
+        FROM users
+        WHERE email ILIKE $1
+           OR first_name ILIKE $1
+           OR last_name ILIKE $1
+        ORDER BY
+            CASE WHEN email ILIKE $1 THEN 0 ELSE 1 END,
+            first_name
+    `, searchPattern)
+}
+```
+
+## Tips
+
+1. **Register all DTOs**: Each struct you use with `Select` or `SelectSingle` must be registered
+2. **Match column names**: SQL column names (or aliases) must match your struct field names after snake_case conversion
+3. **Column validation**: go-lightning validates columns at runtime and returns clear errors for mismatches
+4. **Reuse DTOs**: Create a `dto` package for shared projection types
+5. **Keep it simple**: If a projection is only used once, consider if it's worth the extra type

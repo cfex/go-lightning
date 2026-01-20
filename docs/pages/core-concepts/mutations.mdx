@@ -1,0 +1,215 @@
+# Mutations
+
+go-lightning provides functions for creating, updating, and deleting data.
+
+## Insert
+
+Insert a new record and get the generated ID:
+
+```go
+func Insert[T any](ex Executor, t *T) (int, error)
+```
+
+### Example
+
+```go
+user := User{
+    FirstName: "John",
+    LastName:  "Doe",
+    Email:     "john@example.com",
+}
+
+id, err := lit.Insert(db, &user)
+if err != nil {
+    return err
+}
+fmt.Printf("Created user with ID: %d\n", id)
+```
+
+The INSERT query is pre-generated during registration, so this operation has minimal overhead.
+
+## Insert with UUID
+
+For models with string/UUID IDs, use one of these functions:
+
+### InsertGenericUuid
+
+Generates a new UUID automatically:
+
+```go
+func InsertGenericUuid[T any](ex Executor, t *T) (string, error)
+```
+
+```go
+type Session struct {
+    Id        string
+    UserId    int
+    ExpiresAt time.Time
+}
+
+lit.RegisterModel[Session](lit.PostgreSQL)
+
+session := Session{
+    UserId:    123,
+    ExpiresAt: time.Now().Add(24 * time.Hour),
+}
+
+uuid, err := lit.InsertGenericUuid(db, &session)
+// uuid = "550e8400-e29b-41d4-a716-446655440000"
+// session.Id is also set to this value
+```
+
+### InsertGenericExistingUuid
+
+Use when you already have a UUID:
+
+```go
+func InsertGenericExistingUuid[T any](ex Executor, t *T) error
+```
+
+```go
+session := Session{
+    Id:        "my-existing-uuid",
+    UserId:    123,
+    ExpiresAt: time.Now().Add(24 * time.Hour),
+}
+
+err := lit.InsertGenericExistingUuid(db, &session)
+```
+
+See [UUID Support](/guides/uuid-support) for more details.
+
+## Update
+
+Update a record with a WHERE clause:
+
+```go
+func Update[T any](ex Executor, t *T, where string, args ...any) error
+```
+
+**Important:** The `where` parameter is required and cannot be empty. This prevents accidental updates to all rows.
+
+### Example
+
+```go
+user.FirstName = "Jane"
+user.Email = "jane@example.com"
+
+err := lit.Update(db, &user, "id = $1", user.Id)
+```
+
+The UPDATE query base is pre-generated. The WHERE clause is appended at runtime.
+
+### PostgreSQL Placeholder Handling
+
+For PostgreSQL, placeholders in your WHERE clause are automatically renumbered:
+
+```go
+// Your code
+lit.Update(db, &user, "id = $1 AND active = $2", user.Id, true)
+
+// Executed query (if User has 4 fields):
+// UPDATE users SET id = $1, first_name = $2, last_name = $3, email = $4 WHERE id = $5 AND active = $6
+```
+
+## Delete
+
+Delete uses manual SQL for full control:
+
+```go
+func Delete(ex Executor, query string, args ...any) error
+```
+
+### Example
+
+```go
+// Delete single
+err := lit.Delete(db, "DELETE FROM users WHERE id = $1", userId)
+
+// Delete multiple
+err := lit.Delete(db, "DELETE FROM users WHERE last_login < $1", cutoffDate)
+
+// Delete with IN clause
+ids := []int{1, 2, 3}
+err := lit.Delete(db,
+    "DELETE FROM users WHERE id IN ("+lit.JoinForIn(ids)+")")
+```
+
+## IN Clause Helpers
+
+go-lightning provides helpers for building IN clauses:
+
+### JoinForIn
+
+For integer slices:
+
+```go
+func JoinForIn(ids []int) string
+```
+
+```go
+ids := []int{1, 2, 3, 4, 5}
+query := "SELECT * FROM users WHERE id IN (" + lit.JoinForIn(ids) + ")"
+// Result: SELECT * FROM users WHERE id IN (1,2,3,4,5)
+```
+
+### JoinStringForIn
+
+For parameterized IN clauses with strings:
+
+```go
+func JoinStringForIn[T any](offset int, params []string) string
+```
+
+```go
+emails := []string{"a@test.com", "b@test.com"}
+
+// PostgreSQL (offset=0)
+query := "SELECT * FROM users WHERE email IN (" + lit.JoinStringForIn[User](0, emails) + ")"
+// Result: SELECT * FROM users WHERE email IN ($1,$2)
+
+// MySQL
+query := "SELECT * FROM users WHERE email IN (" + lit.JoinStringForIn[User](0, emails) + ")"
+// Result: SELECT * FROM users WHERE email IN (?,?)
+```
+
+### JoinStringForInWithDriver
+
+When you don't have a registered model:
+
+```go
+func JoinStringForInWithDriver(driver Driver, offset int, count int) string
+```
+
+```go
+placeholders := lit.JoinStringForInWithDriver(lit.PostgreSQL, 0, 3)
+// Result: $1,$2,$3
+```
+
+## Native Operations
+
+For cases where auto-generated queries don't fit:
+
+### InsertNative
+
+```go
+func InsertNative(ex Executor, query string, args ...any) (int, error)
+```
+
+```go
+id, err := lit.InsertNative(db,
+    "INSERT INTO audit_log (action, timestamp) VALUES ($1, $2) RETURNING id",
+    "user_login", time.Now())
+```
+
+### UpdateNative
+
+```go
+func UpdateNative(ex Executor, query string, args ...any) error
+```
+
+```go
+err := lit.UpdateNative(db,
+    "UPDATE counters SET value = value + 1 WHERE name = $1",
+    "page_views")
+```

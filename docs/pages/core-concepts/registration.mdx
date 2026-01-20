@@ -1,0 +1,117 @@
+# Registration
+
+Registration is the foundation of go-lightning's performance. By registering models at startup, all reflection and query generation happens once, not on every database operation.
+
+## Why Registration Exists
+
+Traditional ORMs use reflection on every query to map struct fields to database columns. This adds overhead to every operation. go-lightning takes a different approach:
+
+1. **Register once** at application startup
+2. **Use cached data** for all subsequent operations
+3. **Minimal reflection overhead** during queries
+
+## Basic Registration
+
+```go
+import "github.com/tracewayapp/go-lightning/lit"
+
+type User struct {
+    Id        int
+    FirstName string
+    LastName  string
+    Email     string
+}
+
+func init() {
+    lit.RegisterModel[User](lit.PostgreSQL)
+}
+```
+
+## What Gets Cached
+
+When you call `RegisterModel`, go-lightning creates a `FieldMap` containing:
+
+| Field           | Description                                           |
+| --------------- | ----------------------------------------------------- |
+| `ColumnsMap`    | Maps column names to field positions                  |
+| `ColumnKeys`    | Ordered list of column names                          |
+| `HasIntId`      | Whether `id` field is an integer (for auto-increment) |
+| `InsertQuery`   | Pre-built INSERT statement                            |
+| `UpdateQuery`   | Pre-built UPDATE statement (without WHERE clause)     |
+| `InsertColumns` | Columns used in INSERT (excludes auto-increment id)   |
+| `Driver`        | Database driver (PostgreSQL or MySQL)                 |
+
+## Default Naming Convention
+
+go-lightning converts Go's CamelCase to SQL's snake_case:
+
+| Go Field    | SQL Column   |
+| ----------- | ------------ |
+| `Id`        | `id`         |
+| `FirstName` | `first_name` |
+| `LastName`  | `last_name`  |
+| `CreatedAt` | `created_at` |
+| `UserID`    | `user_i_d`   |
+
+Table names are derived from struct names with an `s` suffix:
+
+- `User` → `users`
+- `Product` → `products`
+
+## ID Detection
+
+go-lightning automatically detects if your `id` field is an integer:
+
+```go
+// Integer ID - uses DEFAULT in INSERT, RETURNING id (PostgreSQL) or LastInsertId (MySQL)
+type User struct {
+    Id   int    // HasIntId = true
+    Name string
+}
+
+// String/UUID ID - includes id in INSERT values
+type Session struct {
+    Id   string  // HasIntId = false
+    Data string
+}
+```
+
+## Custom Naming Strategy
+
+For different naming conventions, use `RegisterModelWithNaming`:
+
+```go
+type MyNamingStrategy struct{}
+
+func (MyNamingStrategy) GetTableNameFromStructName(name string) string {
+    return "tbl_" + strings.ToLower(name)
+}
+
+func (MyNamingStrategy) GetColumnNameFromStructName(name string) string {
+    return strings.ToLower(name)
+}
+
+func init() {
+    lit.RegisterModelWithNaming[User](lit.PostgreSQL, MyNamingStrategy{})
+}
+```
+
+See [Naming Strategies](/guides/naming-strategies) for more details.
+
+## Generated Queries Example
+
+For a registered `User` struct with PostgreSQL:
+
+**INSERT Query:**
+
+```sql
+INSERT INTO users (id,first_name,last_name,email) VALUES (DEFAULT,$1,$2,$3) RETURNING id
+```
+
+**UPDATE Query (base):**
+
+```sql
+UPDATE users SET id = $1,first_name = $2,last_name = $3,email = $4 WHERE
+```
+
+The WHERE clause is appended at runtime when you call `Update()`.

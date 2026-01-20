@@ -1,25 +1,65 @@
 # go-lightning
 
-Lightning-fast database operations with Go generics
+A lightweight, high-performance database library for Go that prioritizes simplicity and speed.
 
-## Overview
+## Why go-lightning?
 
-**go-lightning** is a lightweight Go library that simplifies database operations using generics. It provides type-safe wrappers around `database/sql` with automatic struct-to-table mapping, reducing boilerplate for common CRUD operations while maintaining full control and performance.
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
 
-## Key Features
+<div className="border rounded-lg p-4">
+### Easy to Use
+Simple API with minimal learning curve. Define a struct, register it, and start querying. No complex configurations or setup required.
+</div>
 
-- **Type-Safe CRUD Operations** - Leverage Go generics for compile-time type safety
-- **Automatic Struct Mapping** - Zero-boilerplate mapping between structs and database tables
-- **Multiple Database Support** - PostgreSQL and MySQL implementations included
-- **UUID Generation** - Built-in UUID support for string-based primary keys
-- **Flexible Naming Strategies** - Customize how struct names map to table/column names
-- **Transaction-Based** - Explicit transaction management for predictable behavior
+<div className="border rounded-lg p-4">
+### Cached Queries
+INSERT and UPDATE statements are pre-computed at registration time. Zero runtime overhead for query generation—everything is ready when you need it.
+</div>
+
+<div className="border rounded-lg p-4">
+### SQL-First
+Write your own SQL queries. No magic query builders or DSLs to learn. Full control over your database operations with raw SQL.
+</div>
+
+<div className="border rounded-lg p-4">
+### Insert/Update Out of the Box
+Auto-generated INSERT and UPDATE statements from your struct definition. No boilerplate code for basic CRUD operations.
+</div>
+
+<div className="border rounded-lg p-4">
+### Lightweight
+Minimal dependencies, small footprint. Only imports `database/sql` and `github.com/google/uuid`. No heavy ORM frameworks.
+</div>
+
+<div className="border rounded-lg p-4">
+### No Code Generation
+Unlike sqlc or ent, there's no build step required. No generated files to maintain. Just import and use.
+</div>
+
+<div className="border rounded-lg p-4">
+### No Relationship Mapping
+Explicit over implicit. No hidden JOINs or lazy loading. You control exactly what queries run against your database.
+</div>
+
+<div className="border rounded-lg p-4">
+### Parse to Any Struct
+Project any query result to any DTO. Not limited to your registered models—query complex JOINs and map to custom structs.
+</div>
+
+</div>
 
 ## Quick Example
 
-### Before (Raw SQL)
-
 ```go
+package main
+
+import (
+    "database/sql"
+    "github.com/tracewayapp/go-lightning/lit"
+    _ "github.com/lib/pq"
+)
+
+// Define your model
 type User struct {
     Id        int
     FirstName string
@@ -27,118 +67,32 @@ type User struct {
     Email     string
 }
 
-func InsertUser(tx *sql.Tx, user *User) (int, error) {
-    var id int
-    query := `INSERT INTO users (first_name, last_name, email)
-              VALUES ($1, $2, $3) RETURNING id`
-    err := tx.QueryRow(query, user.FirstName, user.LastName, user.Email).Scan(&id)
-    return id, err
+func main() {
+    // Register the model (happens once at startup)
+    lit.RegisterModel[User](lit.PostgreSQL)
+
+    // Connect to database
+    db, _ := sql.Open("postgres", "postgres://localhost/mydb?sslmode=disable")
+
+    // Create
+    user := User{FirstName: "John", LastName: "Doe", Email: "john@example.com"}
+    id, _ := lit.Insert(db, &user)
+
+    // Read
+    users, _ := lit.Select[User](db, "SELECT id, first_name, last_name, email FROM users")
+
+    // Read single
+    user, _ := lit.SelectSingle[User](db, "SELECT id, first_name, last_name, email FROM users WHERE id = $1", id)
+
+    // Update
+    user.FirstName = "Jane"
+    lit.Update(db, &user, "id = $1", user.Id)
+
+    // Delete
+    lit.Delete(db, "DELETE FROM users WHERE id = $1", id)
 }
-
-func GetUser(tx *sql.Tx, id int) (*User, error) {
-    user := &User{}
-    query := `SELECT id, first_name, last_name, email FROM users WHERE id = $1`
-    err := tx.QueryRow(query, id).Scan(&user.Id, &user.FirstName, &user.LastName, &user.Email)
-    if err == sql.ErrNoRows {
-        return nil, nil
-    }
-    return user, err
-}
-```
-
-### After (go-lightning)
-
-```go
-import "github.com/tracewayapp/go-lightning/lpg"
-
-type User struct {
-    Id        int
-    FirstName string
-    LastName  string
-    Email     string
-}
-
-func init() {
-    lpg.Register[User]()  // One-time registration
-}
-
-// Insert
-id, err := lpg.InsertGeneric(tx, &user)
-
-// Select
-user, err := lpg.SelectGenericSingle[User](tx, "SELECT * FROM users WHERE id = $1", id)
-```
-
-## Installation
-
-### PostgreSQL
-
-```bash
-go get github.com/tracewayapp/go-lightning/lpg
-```
-
-### MySQL
-
-```bash
-go get github.com/tracewayapp/go-lightning/lmy
 ```
 
 ## Get Started
 
-<div style={{ marginTop: '2rem' }}>
-  <a href="/getting-started/quick-start" style={{
-    display: 'inline-block',
-    padding: '0.75rem 1.5rem',
-    backgroundColor: '#0070f3',
-    color: 'white',
-    borderRadius: '0.5rem',
-    textDecoration: 'none',
-    fontWeight: 'bold',
-    marginRight: '1rem'
-  }}>
-    Quick Start Guide →
-  </a>
-  <a href="/api-reference/core/generic-operations" style={{
-    display: 'inline-block',
-    padding: '0.75rem 1.5rem',
-    border: '1px solid #eaeaea',
-    borderRadius: '0.5rem',
-    textDecoration: 'none',
-    fontWeight: 'bold'
-  }}>
-    View API Reference
-  </a>
-</div>
-
-## Why go-lightning?
-
-### Reduce Boilerplate
-
-Write less code for common operations. No more manual `Scan()` calls or repetitive query builders for basic CRUD.
-
-### Type Safety
-
-Compile-time type checking with Go generics. Catch errors before runtime.
-
-### Stay in Control
-
-go-lightning is a thin layer over `database/sql`. You still write SQL queries and manage transactions explicitly. No magic, no surprises.
-
-### Performance
-
-Reflection happens once at registration time. Query execution uses pre-built templates for zero runtime reflection overhead.
-
-## Supported Databases
-
-| Database | Module | Parameter Placeholders | Auto-Increment |
-|----------|--------|----------------------|----------------|
-| **PostgreSQL** | `lpg` | `$1, $2, $3...` | `RETURNING id` |
-| **MySQL** | `lmy` | `?` | `LastInsertId()` |
-
-## Next Steps
-
-- [Quick Start Guide](/getting-started/quick-start) - Get up and running in 5 minutes
-- [Core Concepts](/getting-started/core-concepts) - Understand the architecture
-- [PostgreSQL Guide](/guides/postgresql) - PostgreSQL-specific features
-- [MySQL Guide](/guides/mysql) - MySQL-specific features
-- [Examples](/examples/basic-crud) - Complete working examples
+Ready to use go-lightning? Follow the [installation guide](/getting-started/installation) or jump straight to the [quick start](/getting-started/quick-start).

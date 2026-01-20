@@ -1,0 +1,172 @@
+# Transactions
+
+go-lightning works seamlessly with database transactions through the `Executor` interface.
+
+## The Executor Interface
+
+All go-lightning functions accept an `Executor`:
+
+```go
+type Executor interface {
+    Exec(query string, args ...any) (sql.Result, error)
+    Query(query string, args ...any) (*sql.Rows, error)
+    QueryRow(query string, args ...any) *sql.Row
+}
+```
+
+Both `*sql.DB` and `*sql.Tx` implement this interface, so you can use the same code with or without transactions.
+
+## Basic Transaction Pattern
+
+```go
+func CreateUserWithProfile(db *sql.DB, user *User, profile *Profile) error {
+    tx, err := db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback() // No-op if committed
+
+    // Insert user
+    userId, err := lit.Insert(tx, user)
+    if err != nil {
+        return err
+    }
+
+    // Insert profile with user ID
+    profile.UserId = userId
+    _, err = lit.Insert(tx, profile)
+    if err != nil {
+        return err
+    }
+
+    return tx.Commit()
+}
+```
+
+## Repository Pattern
+
+A common pattern is to accept an `Executor` in your repository methods:
+
+```go
+type UserRepository struct{}
+
+func (r *UserRepository) Create(ex lit.Executor, user *User) (int, error) {
+    return lit.Insert(ex, user)
+}
+
+func (r *UserRepository) FindById(ex lit.Executor, id int) (*User, error) {
+    return lit.SelectSingle[User](ex,
+        "SELECT id, first_name, last_name, email FROM users WHERE id = $1", id)
+}
+
+func (r *UserRepository) Update(ex lit.Executor, user *User) error {
+    return lit.Update(ex, user, "id = $1", user.Id)
+}
+
+func (r *UserRepository) Delete(ex lit.Executor, id int) error {
+    return lit.Delete(ex, "DELETE FROM users WHERE id = $1", id)
+}
+```
+
+### Usage Without Transaction
+
+```go
+repo := &UserRepository{}
+
+user, err := repo.FindById(db, 123)
+```
+
+### Usage With Transaction
+
+```go
+repo := &UserRepository{}
+
+tx, err := db.Begin()
+if err != nil {
+    return err
+}
+defer tx.Rollback()
+
+user, err := repo.FindById(tx, 123)
+if err != nil {
+    return err
+}
+
+user.Email = "new@example.com"
+if err := repo.Update(tx, user); err != nil {
+    return err
+}
+
+return tx.Commit()
+```
+
+## Complete Example
+
+```go
+type OrderService struct {
+    db        *sql.DB
+    users     *UserRepository
+    orders    *OrderRepository
+    inventory *InventoryRepository
+}
+
+func (s *OrderService) PlaceOrder(userId int, items []OrderItem) error {
+    tx, err := s.db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+
+    // Verify user exists
+    user, err := s.users.FindById(tx, userId)
+    if err != nil {
+        return err
+    }
+    if user == nil {
+        return errors.New("user not found")
+    }
+
+    // Create order
+    order := &Order{UserId: userId, Status: "pending"}
+    orderId, err := s.orders.Create(tx, order)
+    if err != nil {
+        return err
+    }
+
+    // Add items and update inventory
+    for _, item := range items {
+        item.OrderId = orderId
+        if _, err := s.orders.AddItem(tx, &item); err != nil {
+            return err
+        }
+        if err := s.inventory.Decrement(tx, item.ProductId, item.Quantity); err != nil {
+            return err
+        }
+    }
+
+    return tx.Commit()
+}
+```
+
+## Error Handling
+
+The deferred `Rollback()` pattern is safe because:
+- If `Commit()` succeeds, `Rollback()` is a no-op
+- If any error occurs before `Commit()`, the transaction is rolled back
+- If `Commit()` fails, the transaction is also rolled back
+
+```go
+tx, err := db.Begin()
+if err != nil {
+    return err
+}
+defer tx.Rollback() // Safe: no-op after successful commit
+
+// ... operations ...
+
+if err := tx.Commit(); err != nil {
+    // Rollback already called by defer
+    return fmt.Errorf("failed to commit: %w", err)
+}
+return nil
+```

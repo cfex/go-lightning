@@ -1,9 +1,9 @@
 {
   "index": "Home",
   "getting-started": "Getting Started",
+  "core-concepts": "Core Concepts",
+  "comparison": "Comparison",
   "guides": "Guides",
   "api-reference": "API Reference",
-  "examples": "Examples",
-  "troubleshooting": "Troubleshooting",
-  "contributing": "Contributing"
+  "examples": "Examples"
 }

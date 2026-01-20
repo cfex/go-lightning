@@ -1,0 +1,299 @@
+# CRUD Repository Example
+
+A complete example implementing the repository pattern with go-lightning.
+
+## Project Structure
+
+```
+myapp/
+├── main.go
+├── models/
+│   └── user.go
+├── repositories/
+│   └── user_repository.go
+└── go.mod
+```
+
+## Model Definition
+
+```go
+// models/user.go
+package models
+
+import "time"
+
+type User struct {
+    Id        int
+    FirstName string
+    LastName  string
+    Email     string
+    Active    bool
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+```
+
+## Repository Implementation
+
+```go
+// repositories/user_repository.go
+package repositories
+
+import (
+    "myapp/models"
+    "time"
+
+    "github.com/tracewayapp/go-lightning/lit"
+)
+
+type UserRepository struct{}
+
+// Create inserts a new user and returns the generated ID
+func (r *UserRepository) Create(ex lit.Executor, user *models.User) (int, error) {
+    user.CreatedAt = time.Now()
+    user.UpdatedAt = time.Now()
+    user.Active = true
+    return lit.Insert(ex, user)
+}
+
+// FindById retrieves a user by ID, returns nil if not found
+func (r *UserRepository) FindById(ex lit.Executor, id int) (*models.User, error) {
+    return lit.SelectSingle[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users WHERE id = $1`, id)
+}
+
+// FindByEmail retrieves a user by email, returns nil if not found
+func (r *UserRepository) FindByEmail(ex lit.Executor, email string) (*models.User, error) {
+    return lit.SelectSingle[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users WHERE email = $1`, email)
+}
+
+// FindAll retrieves all users
+func (r *UserRepository) FindAll(ex lit.Executor) ([]*models.User, error) {
+    return lit.Select[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users ORDER BY id`)
+}
+
+// FindActive retrieves all active users
+func (r *UserRepository) FindActive(ex lit.Executor) ([]*models.User, error) {
+    return lit.Select[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users WHERE active = true ORDER BY id`)
+}
+
+// FindByIds retrieves users by a list of IDs
+func (r *UserRepository) FindByIds(ex lit.Executor, ids []int) ([]*models.User, error) {
+    if len(ids) == 0 {
+        return []*models.User{}, nil
+    }
+    return lit.Select[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users WHERE id IN (`+lit.JoinForIn(ids)+`) ORDER BY id`)
+}
+
+// Update updates an existing user
+func (r *UserRepository) Update(ex lit.Executor, user *models.User) error {
+    user.UpdatedAt = time.Now()
+    return lit.Update(ex, user, "id = $1", user.Id)
+}
+
+// Delete removes a user by ID
+func (r *UserRepository) Delete(ex lit.Executor, id int) error {
+    return lit.Delete(ex, "DELETE FROM users WHERE id = $1", id)
+}
+
+// SoftDelete marks a user as inactive
+func (r *UserRepository) SoftDelete(ex lit.Executor, id int) error {
+    return lit.UpdateNative(ex,
+        "UPDATE users SET active = false, updated_at = $1 WHERE id = $2",
+        time.Now(), id)
+}
+
+// Count returns the total number of users
+func (r *UserRepository) Count(ex lit.Executor) (int, error) {
+    type CountResult struct {
+        Count int
+    }
+    result, err := lit.SelectSingle[CountResult](ex, "SELECT COUNT(*) as count FROM users")
+    if err != nil {
+        return 0, err
+    }
+    return result.Count, nil
+}
+
+// Exists checks if a user with the given email exists
+func (r *UserRepository) Exists(ex lit.Executor, email string) (bool, error) {
+    type ExistsResult struct {
+        Exists bool
+    }
+    result, err := lit.SelectSingle[ExistsResult](ex,
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1) as exists", email)
+    if err != nil {
+        return false, err
+    }
+    return result.Exists, nil
+}
+```
+
+## Main Application
+
+```go
+// main.go
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+
+    "myapp/models"
+    "myapp/repositories"
+
+    "github.com/tracewayapp/go-lightning/lit"
+    _ "github.com/lib/pq"
+)
+
+func init() {
+    // Register models at startup
+    lit.RegisterModel[models.User](lit.PostgreSQL)
+
+    // Register helper structs for queries
+    type CountResult struct{ Count int }
+    type ExistsResult struct{ Exists bool }
+    lit.RegisterModel[CountResult](lit.PostgreSQL)
+    lit.RegisterModel[ExistsResult](lit.PostgreSQL)
+}
+
+func main() {
+    // Connect to database
+    db, err := sql.Open("postgres", "postgres://localhost/mydb?sslmode=disable")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    // Create repository
+    userRepo := &repositories.UserRepository{}
+
+    // Create a user
+    user := &models.User{
+        FirstName: "John",
+        LastName:  "Doe",
+        Email:     "john@example.com",
+    }
+    id, err := userRepo.Create(db, user)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Created user with ID: %d\n", id)
+
+    // Find by ID
+    found, err := userRepo.FindById(db, id)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Found: %s %s\n", found.FirstName, found.LastName)
+
+    // Update
+    found.FirstName = "Jane"
+    if err := userRepo.Update(db, found); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Updated user")
+
+    // List all
+    users, err := userRepo.FindAll(db)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Total users: %d\n", len(users))
+
+    // Delete
+    if err := userRepo.Delete(db, id); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Deleted user")
+}
+```
+
+## Database Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_active ON users(active);
+```
+
+## Using with Transactions
+
+```go
+func CreateUserWithProfile(db *sql.DB, userRepo *repositories.UserRepository, profileRepo *repositories.ProfileRepository) error {
+    tx, err := db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+
+    // Create user
+    user := &models.User{
+        FirstName: "John",
+        LastName:  "Doe",
+        Email:     "john@example.com",
+    }
+    userId, err := userRepo.Create(tx, user)
+    if err != nil {
+        return err
+    }
+
+    // Create profile
+    profile := &models.Profile{
+        UserId: userId,
+        Bio:    "Hello, world!",
+    }
+    _, err = profileRepo.Create(tx, profile)
+    if err != nil {
+        return err
+    }
+
+    return tx.Commit()
+}
+```
+
+## MySQL Version
+
+For MySQL, change the placeholder syntax:
+
+```go
+func (r *UserRepository) FindById(ex lit.Executor, id int) (*models.User, error) {
+    return lit.SelectSingle[models.User](ex,
+        `SELECT id, first_name, last_name, email, active, created_at, updated_at
+         FROM users WHERE id = ?`, id)
+}
+
+func (r *UserRepository) Update(ex lit.Executor, user *models.User) error {
+    user.UpdatedAt = time.Now()
+    return lit.Update(ex, user, "id = ?", user.Id)
+}
+
+func (r *UserRepository) Delete(ex lit.Executor, id int) error {
+    return lit.Delete(ex, "DELETE FROM users WHERE id = ?", id)
+}
+```
+
+And register with MySQL driver:
+
+```go
+lit.RegisterModel[models.User](lit.MySQL)
+```

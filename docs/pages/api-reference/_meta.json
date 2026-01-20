@@ -1,5 +1,3 @@
 {
-  "core": "Core",
-  "postgresql": "PostgreSQL",
-  "mysql": "MySQL"
+  "functions": "Functions"
 }

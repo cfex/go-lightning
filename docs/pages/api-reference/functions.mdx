@@ -1,0 +1,359 @@
+# API Reference
+
+Complete reference for all go-lightning functions and types.
+
+## Registration
+
+### RegisterModel
+
+Registers a model with the default naming strategy.
+
+```go
+func RegisterModel[T any](driver Driver)
+```
+
+**Parameters:**
+- `driver`: Database driver (`lit.PostgreSQL` or `lit.MySQL`)
+
+**Example:**
+```go
+lit.RegisterModel[User](lit.PostgreSQL)
+```
+
+### RegisterModelWithNaming
+
+Registers a model with a custom naming strategy.
+
+```go
+func RegisterModelWithNaming[T any](driver Driver, namingStrategy DbNamingStrategy)
+```
+
+**Parameters:**
+- `driver`: Database driver
+- `namingStrategy`: Implementation of `DbNamingStrategy`
+
+**Example:**
+```go
+lit.RegisterModelWithNaming[User](lit.PostgreSQL, MyNamingStrategy{})
+```
+
+## Query Functions
+
+### Select
+
+Executes a query and returns all matching rows.
+
+```go
+func Select[T any](ex Executor, query string, args ...any) ([]*T, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `query`: SQL SELECT query
+- `args`: Query parameters
+
+**Returns:**
+- `[]*T`: Slice of pointers to results
+- `error`: Any error that occurred
+
+**Example:**
+```go
+users, err := lit.Select[User](db, "SELECT id, name, email FROM users WHERE active = $1", true)
+```
+
+### SelectSingle
+
+Executes a query and returns a single row or nil.
+
+```go
+func SelectSingle[T any](ex Executor, query string, args ...any) (*T, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `query`: SQL SELECT query
+- `args`: Query parameters
+
+**Returns:**
+- `*T`: Pointer to result, or nil if not found
+- `error`: Any error that occurred
+
+**Example:**
+```go
+user, err := lit.SelectSingle[User](db, "SELECT id, name, email FROM users WHERE id = $1", 123)
+```
+
+### SelectMultipleNative
+
+Executes a query with manual row scanning.
+
+```go
+func SelectMultipleNative[T any](
+    ex Executor,
+    mapLine func(*interface{ Scan(...any) error }, *T) error,
+    query string,
+    args ...any,
+) ([]*T, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `mapLine`: Function to scan each row
+- `query`: SQL SELECT query
+- `args`: Query parameters
+
+**Example:**
+```go
+results, err := lit.SelectMultipleNative[Result](db,
+    func(scanner *interface{ Scan(...any) error }, r *Result) error {
+        return (*scanner).Scan(&r.Name, &r.Value)
+    },
+    "SELECT name, value FROM items")
+```
+
+## Mutation Functions
+
+### Insert
+
+Inserts a record and returns the generated ID.
+
+```go
+func Insert[T any](ex Executor, t *T) (int, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `t`: Pointer to the struct to insert
+
+**Returns:**
+- `int`: Generated ID
+- `error`: Any error that occurred
+
+**Example:**
+```go
+id, err := lit.Insert(db, &user)
+```
+
+### InsertGenericUuid
+
+Inserts a record with an auto-generated UUID.
+
+```go
+func InsertGenericUuid[T any](ex Executor, t *T) (string, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `t`: Pointer to the struct to insert (Id field will be set)
+
+**Returns:**
+- `string`: Generated UUID
+- `error`: Any error that occurred
+
+**Example:**
+```go
+uuid, err := lit.InsertGenericUuid(db, &session)
+```
+
+### InsertGenericExistingUuid
+
+Inserts a record with a pre-existing UUID.
+
+```go
+func InsertGenericExistingUuid[T any](ex Executor, t *T) error
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `t`: Pointer to the struct to insert (Id must be set)
+
+**Returns:**
+- `error`: Any error that occurred
+
+**Example:**
+```go
+err := lit.InsertGenericExistingUuid(db, &session)
+```
+
+### InsertNative
+
+Executes a manual INSERT query.
+
+```go
+func InsertNative(ex Executor, query string, args ...any) (int, error)
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `query`: SQL INSERT query
+- `args`: Query parameters
+
+**Returns:**
+- `int`: Last inserted ID
+- `error`: Any error that occurred
+
+### Update
+
+Updates a record with a WHERE clause.
+
+```go
+func Update[T any](ex Executor, t *T, where string, args ...any) error
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `t`: Pointer to the struct with updated values
+- `where`: WHERE clause (required, cannot be empty)
+- `args`: WHERE clause parameters
+
+**Returns:**
+- `error`: Any error that occurred
+
+**Example:**
+```go
+err := lit.Update(db, &user, "id = $1", user.Id)
+```
+
+### UpdateNative
+
+Executes a manual UPDATE query.
+
+```go
+func UpdateNative(ex Executor, query string, args ...any) error
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `query`: SQL UPDATE query
+- `args`: Query parameters
+
+### Delete
+
+Executes a DELETE query.
+
+```go
+func Delete(ex Executor, query string, args ...any) error
+```
+
+**Parameters:**
+- `ex`: Database connection or transaction
+- `query`: SQL DELETE query
+- `args`: Query parameters
+
+**Example:**
+```go
+err := lit.Delete(db, "DELETE FROM users WHERE id = $1", 123)
+```
+
+## Helper Functions
+
+### JoinForIn
+
+Creates a comma-separated string of integers for IN clauses.
+
+```go
+func JoinForIn(ids []int) string
+```
+
+**Example:**
+```go
+ids := []int{1, 2, 3}
+query := "SELECT * FROM users WHERE id IN (" + lit.JoinForIn(ids) + ")"
+// Result: SELECT * FROM users WHERE id IN (1,2,3)
+```
+
+### JoinStringForIn
+
+Creates parameterized placeholders for IN clauses.
+
+```go
+func JoinStringForIn[T any](offset int, params []string) string
+```
+
+**Parameters:**
+- `offset`: Starting parameter number (for PostgreSQL)
+- `params`: Slice of values (used to determine count)
+
+**Example:**
+```go
+emails := []string{"a@test.com", "b@test.com"}
+placeholders := lit.JoinStringForIn[User](0, emails)
+// PostgreSQL: $1,$2
+// MySQL: ?,?
+```
+
+### JoinStringForInWithDriver
+
+Creates parameterized placeholders for a specific driver.
+
+```go
+func JoinStringForInWithDriver(driver Driver, offset int, count int) string
+```
+
+**Example:**
+```go
+placeholders := lit.JoinStringForInWithDriver(lit.PostgreSQL, 2, 3)
+// Result: $3,$4,$5
+```
+
+## Types
+
+### Driver
+
+Database driver enum.
+
+```go
+type Driver int
+
+const (
+    PostgreSQL Driver = iota
+    MySQL
+)
+```
+
+### Executor
+
+Interface for database operations (implemented by `*sql.DB` and `*sql.Tx`).
+
+```go
+type Executor interface {
+    Exec(query string, args ...any) (sql.Result, error)
+    Query(query string, args ...any) (*sql.Rows, error)
+    QueryRow(query string, args ...any) *sql.Row
+}
+```
+
+### DbNamingStrategy
+
+Interface for custom naming conventions.
+
+```go
+type DbNamingStrategy interface {
+    GetTableNameFromStructName(string) string
+    GetColumnNameFromStructName(string) string
+}
+```
+
+### DefaultDbNamingStrategy
+
+Built-in naming strategy (CamelCase → snake_case).
+
+```go
+type DefaultDbNamingStrategy struct{}
+```
+
+### FieldMap
+
+Cached metadata for a registered model.
+
+```go
+type FieldMap struct {
+    ColumnsMap    map[string]int  // Column name → field index
+    ColumnKeys    []string        // Ordered column names
+    HasIntId      bool            // Whether id is an integer
+    InsertQuery   string          // Pre-built INSERT query
+    UpdateQuery   string          // Pre-built UPDATE query (without WHERE)
+    InsertColumns []string        // Columns used in INSERT
+    Driver        Driver          // Database driver
+}
+```
