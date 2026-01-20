@@ -51,7 +51,7 @@ func (d DefaultDbNamingStrategy) GetColumnNameFromStructName(input string) strin
 	return result.String()
 }
 
-func SelectMultiple[T any](tx *sql.Tx, mapLine func(*sql.Rows, *T) error, query string, args ...any) ([]*T, error) {
+func SelectMultipleNative[T any](tx *sql.Tx, mapLine func(*sql.Rows, *T) error, query string, args ...any) ([]*T, error) {
 	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func SelectSingle[T any](tx *sql.Tx, mapLine func(*sql.Rows, *T) error, query st
 	return nil, nil
 }
 
-func Insert(tx *sql.Tx, query string, args ...any) (int, error) {
+func InsertNative(tx *sql.Tx, query string, args ...any) (int, error) {
 	result, err := tx.Exec(query, args...)
 	if err != nil {
 		return 0, err
@@ -107,7 +107,7 @@ func Insert(tx *sql.Tx, query string, args ...any) (int, error) {
 	return int(id), nil
 }
 
-func Update(tx *sql.Tx, query string, args ...any) error {
+func UpdateNative(tx *sql.Tx, query string, args ...any) error {
 	_, err := (*tx).Exec(query, args...)
 	if err != nil {
 		return err

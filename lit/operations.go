@@ -163,7 +163,7 @@ func Delete(ex Executor, query string, args ...any) error {
 	return err
 }
 
-func SelectMultiple[T any](ex Executor, mapLine func(*interface{ Scan(...any) error }, *T) error, query string, args ...any) ([]*T, error) {
+func SelectMultipleNative[T any](ex Executor, mapLine func(*interface{ Scan(...any) error }, *T) error, query string, args ...any) ([]*T, error) {
 	rows, err := ex.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func SelectMultiple[T any](ex Executor, mapLine func(*interface{ Scan(...any) er
 	return list, nil
 }
 
-func Insert(ex Executor, query string, args ...any) (int, error) {
+func InsertNative(ex Executor, query string, args ...any) (int, error) {
 	result, err := ex.Exec(query, args...)
 	if err != nil {
 		return 0, err
@@ -200,7 +200,7 @@ func Insert(ex Executor, query string, args ...any) (int, error) {
 	return int(id), nil
 }
 
-func Update(ex Executor, query string, args ...any) error {
+func UpdateNative(ex Executor, query string, args ...any) error {
 	_, err := ex.Exec(query, args...)
 	return err
 }

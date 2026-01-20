@@ -242,11 +242,11 @@ func TestGetFieldMapUnregistered(t *testing.T) {
 }
 
 // ========== Database Function Tests (require sql mock) ==========
-// Note: SelectMultiple, SelectSingle, Insert, Update, Delete
+// Note: SelectMultipleNative, SelectSingle, InsertNative, UpdateNative, Delete
 // require a database connection or mock. These tests would need
 // a testing database or sqlmock package for proper testing.
 
-func TestSelectMultiple(t *testing.T) {
+func TestSelectMultipleNative(t *testing.T) {
 	tests := []struct {
 		name          string
 		query         string
@@ -342,7 +342,7 @@ func TestSelectMultiple(t *testing.T) {
 
 			tt.setupMock(mock)
 
-			result, err := SelectMultiple[TestUser](tx, mapTestUser, tt.query, tt.args...)
+			result, err := SelectMultipleNative[TestUser](tx, mapTestUser, tt.query, tt.args...)
 
 			if tt.expectedError {
 				assert.Error(t, err)
@@ -499,7 +499,7 @@ func TestSelectSingle(t *testing.T) {
 	}
 }
 
-func TestInsert(t *testing.T) {
+func TestInsertNative(t *testing.T) {
 	tests := []struct {
 		name          string
 		query         string
@@ -577,7 +577,7 @@ func TestInsert(t *testing.T) {
 
 			tt.setupMock(mock)
 
-			id, err := Insert(tx, tt.query, tt.args...)
+			id, err := InsertNative(tx, tt.query, tt.args...)
 
 			if tt.expectedError {
 				assert.Error(t, err)
@@ -592,7 +592,7 @@ func TestInsert(t *testing.T) {
 	}
 }
 
-func TestUpdate(t *testing.T) {
+func TestUpdateNative(t *testing.T) {
 	tests := []struct {
 		name          string
 		query         string
@@ -653,7 +653,7 @@ func TestUpdate(t *testing.T) {
 
 			tt.setupMock(mock)
 
-			err := Update(tx, tt.query, tt.args...)
+			err := UpdateNative(tx, tt.query, tt.args...)
 
 			if tt.expectedError {
 				assert.Error(t, err)
