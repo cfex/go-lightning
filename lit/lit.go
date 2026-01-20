@@ -1,0 +1,168 @@
+package lit
+
+import (
+	"database/sql"
+	"fmt"
+	"reflect"
+	"strings"
+	"unicode"
+)
+
+type Driver int
+
+const (
+	PostgreSQL Driver = iota
+	MySQL
+)
+
+func (d Driver) String() string {
+	switch d {
+	case PostgreSQL:
+		return "PostgreSQL"
+	case MySQL:
+		return "MySQL"
+	default:
+		return "Unknown"
+	}
+}
+
+func (d Driver) InsertAndGetId(ex Executor, query string, args ...any) (int, error) {
+	switch d {
+	case PostgreSQL:
+		row := ex.QueryRow(query, args...)
+		var id int
+		err := row.Scan(&id)
+		if err != nil {
+			return 0, err
+		}
+		return id, nil
+	case MySQL:
+		result, err := ex.Exec(query, args...)
+		if err != nil {
+			return 0, err
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+		return int(id), nil
+	default:
+		return 0, fmt.Errorf("unsupported driver: %v", d)
+	}
+}
+
+type Executor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+type DbNamingStrategy interface {
+	GetTableNameFromStructName(string) string
+	GetColumnNameFromStructName(string) string
+}
+
+type DefaultDbNamingStrategy struct{}
+
+func (d DefaultDbNamingStrategy) GetTableNameFromStructName(input string) string {
+	var result strings.Builder
+	for i, r := range input {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				result.WriteRune('_')
+			}
+			result.WriteRune(unicode.ToLower(r))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	result.WriteRune('s')
+	return result.String()
+}
+
+func (d DefaultDbNamingStrategy) GetColumnNameFromStructName(input string) string {
+	var result strings.Builder
+	for i, r := range input {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				result.WriteRune('_')
+			}
+			result.WriteRune(unicode.ToLower(r))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
+type FieldMap struct {
+	ColumnsMap    map[string]int
+	ColumnKeys    []string
+	HasIntId      bool
+	InsertQuery   string
+	UpdateQuery   string
+	InsertColumns []string
+	Driver        Driver
+}
+
+type InsertUpdateQueryGenerator interface {
+	GenerateInsertQuery(tableName string, columnKeys []string, hasIntId bool) (string, []string)
+	GenerateUpdateQuery(tableName string, columnKeys []string) string
+}
+
+var StructToFieldMap = make(map[reflect.Type]*FieldMap)
+
+func RegisterModel[T any](driver Driver) {
+	RegisterModelWithNaming[T](driver, DefaultDbNamingStrategy{})
+}
+
+func RegisterModelWithNaming[T any](driver Driver, namingStrategy DbNamingStrategy) {
+	t := reflect.TypeFor[T]()
+
+	columnsMap := make(map[string]int)
+	columnKeys := []string{}
+	hasIntId := false
+	for i := 0; i < t.NumField(); i++ {
+		name := namingStrategy.GetColumnNameFromStructName(t.Field(i).Name)
+		if name == "id" {
+			if t.Field(i).Type.AssignableTo(reflect.TypeOf(0)) {
+				hasIntId = true
+			}
+		}
+		columnKeys = append(columnKeys, name)
+		columnsMap[name] = i
+	}
+
+	tableName := namingStrategy.GetTableNameFromStructName(t.Name())
+
+	var queryGenerator InsertUpdateQueryGenerator
+	switch driver {
+	case PostgreSQL:
+		queryGenerator = PgInsertUpdateQueryGenerator{}
+	case MySQL:
+		queryGenerator = MySqlInsertUpdateQueryGenerator{}
+	default:
+		panic(fmt.Sprintf("unsupported driver: %v", driver))
+	}
+
+	insertQuery, insertColumns := queryGenerator.GenerateInsertQuery(tableName, columnKeys, hasIntId)
+	updateQuery := queryGenerator.GenerateUpdateQuery(tableName, columnKeys)
+
+	StructToFieldMap[t] = &FieldMap{
+		ColumnsMap:    columnsMap,
+		ColumnKeys:    columnKeys,
+		HasIntId:      hasIntId,
+		InsertQuery:   insertQuery,
+		UpdateQuery:   updateQuery,
+		InsertColumns: insertColumns,
+		Driver:        driver,
+	}
+}
+
+func GetFieldMap(t reflect.Type) (*FieldMap, error) {
+	val, ok := StructToFieldMap[t]
+	if !ok {
+		return nil, fmt.Errorf("non registered model %s used. Please call `lit.RegisterModel[%s](driver)` after you define %s", t.Name(), t.Name(), t.Name())
+	}
+	return val, nil
+}
