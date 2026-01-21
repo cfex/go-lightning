@@ -154,6 +154,70 @@ placeholders := lit.JoinStringForInWithDriver(lit.PostgreSQL, 0, 3) // "$1,$2,$3
 placeholders := lit.JoinStringForInWithDriver(lit.MySQL, 0, 3)      // "?,?,?"
 ```
 
+### 6. Column Naming
+
+By default, `go-lightning` converts Go struct field names from CamelCase to snake_case for database column names:
+
+| Struct Field | Database Column |
+|--------------|-----------------|
+| `Id`         | `id`            |
+| `FirstName`  | `first_name`    |
+| `LastName`   | `last_name`     |
+| `Email`      | `email`         |
+
+#### Custom Column Names with `lit` Tags
+
+You can override the default naming by using the `lit` struct tag:
+
+```go
+type User struct {
+    Id        int    `lit:"id"`
+    FirstName string `lit:"first_name"`
+    LastName  string `lit:"surname"`       // Maps to "surname" instead of "last_name"
+    Email     string `lit:"email_address"` // Maps to "email_address" instead of "email"
+}
+```
+
+The `lit` tag is used for:
+- **INSERT queries**: Column names in the generated INSERT statement
+- **UPDATE queries**: Column names in the generated UPDATE statement
+- **SELECT queries**: Mapping database columns back to struct fields
+
+#### Mixing Tagged and Untagged Fields
+
+You can use `lit` tags on only some fields. Fields without tags use the default snake_case conversion:
+
+```go
+type User struct {
+    Id          int                       // Uses default: "id"
+    FirstName   string `lit:"given_name"` // Uses tag: "given_name"
+    LastName    string                    // Uses default: "last_name"
+    PhoneNumber string `lit:"phone"`      // Uses tag: "phone"
+}
+```
+
+#### Custom Naming Strategy
+
+For more control over naming conventions, you can implement the `DbNamingStrategy` interface and use `RegisterModelWithNaming`:
+
+```go
+type MyNamingStrategy struct{}
+
+func (m MyNamingStrategy) GetTableNameFromStructName(name string) string {
+    return strings.ToLower(name) // e.g., "User" -> "user"
+}
+
+func (m MyNamingStrategy) GetColumnNameFromStructName(name string) string {
+    return strings.ToLower(name) // e.g., "FirstName" -> "firstname"
+}
+
+func init() {
+    lit.RegisterModelWithNaming[User](lit.PostgreSQL, MyNamingStrategy{})
+}
+```
+
+Note: The `lit` tag takes precedence over any naming strategy.
+
 ## Contributions
 
 We welcome all contributions to the go-lightning project. You can open issues or PR and we will review and promptly merge them.
@@ -163,7 +227,7 @@ We welcome all contributions to the go-lightning project. You can open issues or
 - [x] ~~Add support for ClickHouse - we're not doing this as clickhouse has a driver that is basically already doing this~~
 - [x] ~~Add more examples - the usercrud example is mostly complete - we'll add more if we get a git issue filed to do so~~
 - [x] ~~Add project docs~~
-- [ ] Add support for named fields `db:"column_name"` (this can be done by using a naming strategy currently)
+- [x] ~~Add support for named fields `lit:"column_name"`~~
 - [ ] Named query parameters
 - [ ] Add a project homepage
 - [ ] Add support for composite primary keys

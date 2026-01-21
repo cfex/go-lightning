@@ -123,9 +123,13 @@ func RegisterModelWithNaming[T any](driver Driver, namingStrategy DbNamingStrate
 	columnKeys := []string{}
 	hasIntId := false
 	for i := 0; i < t.NumField(); i++ {
-		name := namingStrategy.GetColumnNameFromStructName(t.Field(i).Name)
+		field := t.Field(i)
+		name := field.Tag.Get("lit")
+		if name == "" {
+			name = namingStrategy.GetColumnNameFromStructName(field.Name)
+		}
 		if name == "id" {
-			if t.Field(i).Type.AssignableTo(reflect.TypeOf(0)) {
+			if field.Type.AssignableTo(reflect.TypeOf(0)) {
 				hasIntId = true
 			}
 		}

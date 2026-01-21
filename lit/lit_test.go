@@ -22,6 +22,20 @@ type TestProduct struct {
 	Price int
 }
 
+type TestUserWithTags struct {
+	Id        int    `lit:"id"`
+	FirstName string `lit:"first_name"`
+	LastName  string `lit:"surname"` // Different from default snake_case
+	Email     string `lit:"email_address"`
+}
+
+type TestMixedTags struct {
+	Id          int
+	FirstName   string `lit:"given_name"`
+	LastName    string // Will use default snake_case (last_name)
+	PhoneNumber string `lit:"phone"`
+}
+
 func TestDriverString(t *testing.T) {
 	assert.Equal(t, "PostgreSQL", PostgreSQL.String())
 	assert.Equal(t, "MySQL", MySQL.String())
@@ -719,6 +733,225 @@ func TestInsertExistingUuid_MySQL(t *testing.T) {
 	product := &TestProduct{Id: "existing-uuid-123", Name: "Widget", Price: 100}
 	err = InsertExistingUuid[TestProduct](db, product)
 	require.NoError(t, err)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRegisterModel_WithLitTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+
+	RegisterModel[TestUserWithTags](PostgreSQL)
+
+	fieldMap, err := GetFieldMap(reflect.TypeFor[TestUserWithTags]())
+	require.NoError(t, err)
+	require.NotNil(t, fieldMap)
+
+	// Verify column names from lit tags are used
+	assert.Contains(t, fieldMap.ColumnKeys, "id")
+	assert.Contains(t, fieldMap.ColumnKeys, "first_name")
+	assert.Contains(t, fieldMap.ColumnKeys, "surname")       // Custom tag, not "last_name"
+	assert.Contains(t, fieldMap.ColumnKeys, "email_address") // Custom tag, not "email"
+
+	// Verify ColumnsMap maps to correct field indices
+	assert.Equal(t, 0, fieldMap.ColumnsMap["id"])
+	assert.Equal(t, 1, fieldMap.ColumnsMap["first_name"])
+	assert.Equal(t, 2, fieldMap.ColumnsMap["surname"])
+	assert.Equal(t, 3, fieldMap.ColumnsMap["email_address"])
+
+	// Verify INSERT query uses custom column names
+	assert.Contains(t, fieldMap.InsertQuery, "surname")
+	assert.Contains(t, fieldMap.InsertQuery, "email_address")
+	assert.NotContains(t, fieldMap.InsertQuery, "last_name")
+}
+
+func TestRegisterModel_WithMixedTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestMixedTags]())
+
+	RegisterModel[TestMixedTags](PostgreSQL)
+
+	fieldMap, err := GetFieldMap(reflect.TypeFor[TestMixedTags]())
+	require.NoError(t, err)
+	require.NotNil(t, fieldMap)
+
+	// Verify mixed usage: some from tags, some from naming strategy
+	assert.Contains(t, fieldMap.ColumnKeys, "id")         // Default
+	assert.Contains(t, fieldMap.ColumnKeys, "given_name") // From tag
+	assert.Contains(t, fieldMap.ColumnKeys, "last_name")  // Default snake_case
+	assert.Contains(t, fieldMap.ColumnKeys, "phone")      // From tag
+
+	// Verify naming strategy default is NOT used when tag is present
+	assert.NotContains(t, fieldMap.ColumnKeys, "first_name")   // Would be default
+	assert.NotContains(t, fieldMap.ColumnKeys, "phone_number") // Would be default
+}
+
+func TestInsert_WithLitTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](PostgreSQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id"}).AddRow(42)
+
+	// Expect INSERT with custom column names from lit tags
+	mock.ExpectQuery("INSERT INTO test_user_with_tagss \\(id,first_name,surname,email_address\\)").
+		WithArgs("John", "Doe", "john@example.com").
+		WillReturnRows(rows)
+
+	user := &TestUserWithTags{FirstName: "John", LastName: "Doe", Email: "john@example.com"}
+	id, err := Insert[TestUserWithTags](db, user)
+	require.NoError(t, err)
+	assert.Equal(t, 42, id)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestInsert_WithLitTags_MySQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](MySQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Expect INSERT with custom column names from lit tags
+	mock.ExpectExec("INSERT INTO test_user_with_tagss \\(id,first_name,surname,email_address\\)").
+		WithArgs("John", "Doe", "john@example.com").
+		WillReturnResult(sqlmock.NewResult(42, 1))
+
+	user := &TestUserWithTags{FirstName: "John", LastName: "Doe", Email: "john@example.com"}
+	id, err := Insert[TestUserWithTags](db, user)
+	require.NoError(t, err)
+	assert.Equal(t, 42, id)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdate_WithLitTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](PostgreSQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Expect UPDATE with custom column names from lit tags
+	mock.ExpectExec("UPDATE test_user_with_tagss SET id = \\$1,first_name = \\$2,surname = \\$3,email_address = \\$4 WHERE").
+		WithArgs(1, "John", "Doe", "john@example.com", 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	user := &TestUserWithTags{Id: 1, FirstName: "John", LastName: "Doe", Email: "john@example.com"}
+	err = Update[TestUserWithTags](db, user, "id = $1", 1)
+	require.NoError(t, err)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdate_WithLitTags_MySQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](MySQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Expect UPDATE with custom column names from lit tags
+	mock.ExpectExec("UPDATE test_user_with_tagss SET id = \\?,first_name = \\?,surname = \\?,email_address = \\? WHERE").
+		WithArgs(1, "John", "Doe", "john@example.com", 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	user := &TestUserWithTags{Id: 1, FirstName: "John", LastName: "Doe", Email: "john@example.com"}
+	err = Update[TestUserWithTags](db, user, "id = ?", 1)
+	require.NoError(t, err)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSelect_WithLitTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](PostgreSQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Return rows with custom column names (as they would be in the database)
+	rows := sqlmock.NewRows([]string{"id", "first_name", "surname", "email_address"}).
+		AddRow(1, "John", "Doe", "john@example.com").
+		AddRow(2, "Jane", "Smith", "jane@example.com")
+
+	mock.ExpectQuery("SELECT \\* FROM test_user_with_tagss").WillReturnRows(rows)
+
+	users, err := Select[TestUserWithTags](db, "SELECT * FROM test_user_with_tagss")
+	require.NoError(t, err)
+	assert.Len(t, users, 2)
+
+	// Verify data is correctly mapped to struct fields
+	assert.Equal(t, 1, users[0].Id)
+	assert.Equal(t, "John", users[0].FirstName)
+	assert.Equal(t, "Doe", users[0].LastName)
+	assert.Equal(t, "john@example.com", users[0].Email)
+
+	assert.Equal(t, 2, users[1].Id)
+	assert.Equal(t, "Jane", users[1].FirstName)
+	assert.Equal(t, "Smith", users[1].LastName)
+	assert.Equal(t, "jane@example.com", users[1].Email)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSelect_WithLitTags_MySQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](MySQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Return rows with custom column names (as they would be in the database)
+	rows := sqlmock.NewRows([]string{"id", "first_name", "surname", "email_address"}).
+		AddRow(1, "John", "Doe", "john@example.com").
+		AddRow(2, "Jane", "Smith", "jane@example.com")
+
+	mock.ExpectQuery("SELECT \\* FROM test_user_with_tagss").WillReturnRows(rows)
+
+	users, err := Select[TestUserWithTags](db, "SELECT * FROM test_user_with_tagss")
+	require.NoError(t, err)
+	assert.Len(t, users, 2)
+
+	// Verify data is correctly mapped to struct fields
+	assert.Equal(t, 1, users[0].Id)
+	assert.Equal(t, "John", users[0].FirstName)
+	assert.Equal(t, "Doe", users[0].LastName)
+	assert.Equal(t, "john@example.com", users[0].Email)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSelectSingle_WithLitTags_PostgreSQL(t *testing.T) {
+	delete(StructToFieldMap, reflect.TypeFor[TestUserWithTags]())
+	RegisterModel[TestUserWithTags](PostgreSQL)
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	rows := sqlmock.NewRows([]string{"id", "first_name", "surname", "email_address"}).
+		AddRow(1, "John", "Doe", "john@example.com")
+
+	mock.ExpectQuery("SELECT \\* FROM test_user_with_tagss WHERE id = \\$1").
+		WithArgs(1).
+		WillReturnRows(rows)
+
+	user, err := SelectSingle[TestUserWithTags](db, "SELECT * FROM test_user_with_tagss WHERE id = $1", 1)
+	require.NoError(t, err)
+	require.NotNil(t, user)
+
+	assert.Equal(t, 1, user.Id)
+	assert.Equal(t, "John", user.FirstName)
+	assert.Equal(t, "Doe", user.LastName)
+	assert.Equal(t, "john@example.com", user.Email)
 
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
